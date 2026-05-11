@@ -19,8 +19,6 @@
 ![Automation](https://img.shields.io/badge/Automation-Python-green?style=for-the-badge&logo=python)
 ![3D Printing](https://img.shields.io/badge/3D%20Printing-Manufacturing-orange?style=for-the-badge&logo=printables)
 
-🔗 **Canlı Portfolyo:** [ymk-app.vercel.app](https://ymk-app.vercel.app/)
-
 ---
 
 ### 📫 Bana Ulaşın
