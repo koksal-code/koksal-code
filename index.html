@@ -1,0 +1,509 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>CelebiPlug — Cinematic 3D drone shots from GeoJSON</title>
+    <meta
+      name="description"
+      content="CelebiPlug turns any GeoJSON into a 60-second cinematic WebM. Mapbox satellite, 3D terrain, 3D buildings — captured straight from your browser. Open source."
+    />
+    <meta property="og:title" content="CelebiPlug — Geo-cinema engine" />
+    <meta property="og:description" content="GeoJSON in. 60-second cinematic WebM out. Open source." />
+    <meta property="og:type" content="website" />
+
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link
+      href="https://fonts.googleapis.com/css2?family=Anybody:ital,wdth,wght@0,75..125,100..900;1,75..125,100..900&family=Geist:wght@100..900&family=JetBrains+Mono:wght@300..700&display=swap"
+      rel="stylesheet"
+    />
+
+    <style>
+      :root {
+        color-scheme: dark;
+        --ink: #07070a;
+        --bone: #f3eee5;
+        --bone-dim: #b8b3a8;
+        --mute: #7d808a;
+        --mute-2: #585b66;
+        --amber: #ff9f1c;
+        --amber-hot: #ff5b1f;
+        --green: #4ade80;
+        --line: rgba(243, 238, 229, 0.07);
+        --line-2: rgba(243, 238, 229, 0.14);
+        --f-display: "Anybody", "Geist", system-ui, sans-serif;
+        --f-sans: "Geist", system-ui, sans-serif;
+        --f-mono: "JetBrains Mono", ui-monospace, "SF Mono", monospace;
+      }
+
+      * { box-sizing: border-box; }
+      html, body {
+        margin: 0;
+        height: 100%;
+        overflow: hidden; /* single screen, no scroll */
+      }
+      body {
+        background: var(--ink);
+        color: var(--bone);
+        font-family: var(--f-sans);
+        font-feature-settings: "ss01", "ss02";
+        -webkit-font-smoothing: antialiased;
+        -moz-osx-font-smoothing: grayscale;
+      }
+      button { font: inherit; color: inherit; background: none; border: 0; cursor: pointer; }
+      a { color: inherit; text-decoration: none; }
+      .mono { font-family: var(--f-mono); font-feature-settings: "tnum", "zero"; letter-spacing: 0.02em; }
+
+      /* ====== background layers — same onboarding image ====== */
+      .bg {
+        position: fixed;
+        inset: 0;
+        z-index: -3;
+        background:
+          linear-gradient(135deg, rgba(7, 7, 10, 0.55), rgba(13, 15, 22, 0.45)),
+          url("onboarding.png") center/cover no-repeat;
+      }
+      .bg-vignette {
+        position: fixed;
+        inset: 0;
+        z-index: -2;
+        background:
+          radial-gradient(ellipse at center, transparent 28%, rgba(7, 7, 10, 0.6) 78%, rgba(7, 7, 10, 0.92) 100%),
+          linear-gradient(180deg, rgba(7, 7, 10, 0.35) 0%, transparent 30%, transparent 70%, rgba(7, 7, 10, 0.5) 100%);
+        pointer-events: none;
+      }
+      .grain {
+        position: fixed;
+        inset: 0;
+        z-index: -1;
+        pointer-events: none;
+        opacity: 0.06;
+        mix-blend-mode: overlay;
+        background-image: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='160' height='160'><filter id='n'><feTurbulence type='fractalNoise' baseFrequency='0.85' numOctaves='2' stitchTiles='stitch'/><feColorMatrix values='0 0 0 0 1 0 0 0 0 1 0 0 0 0 1 0 0 0 0.6 0'/></filter><rect width='100%25' height='100%25' filter='url(%23n)'/></svg>");
+      }
+      .scanline {
+        position: fixed;
+        inset: 0;
+        z-index: -1;
+        pointer-events: none;
+        background: repeating-linear-gradient(
+          180deg,
+          rgba(255, 255, 255, 0) 0,
+          rgba(255, 255, 255, 0) 3px,
+          rgba(255, 255, 255, 0.014) 3px,
+          rgba(255, 255, 255, 0.014) 4px
+        );
+      }
+
+      /* ====== layout — fixed 100vh grid, no scroll ====== */
+      .page {
+        position: relative;
+        height: 100vh;
+        display: grid;
+        grid-template-rows: 48px 1fr 30px;
+        padding: 0 28px;
+      }
+
+      .topbar, .bottombar {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        gap: 16px;
+        font-size: 10.5px;
+        letter-spacing: 0.18em;
+        text-transform: uppercase;
+        color: var(--bone-dim);
+      }
+      .topbar { border-bottom: 1px solid var(--line); }
+      .bottombar {
+        border-top: 1px solid var(--line);
+        color: var(--mute);
+        font-size: 9.5px;
+      }
+
+      .brand { display: flex; align-items: center; gap: 10px; }
+      .dot {
+        width: 7px;
+        height: 7px;
+        border-radius: 50%;
+        background: var(--green);
+        box-shadow: 0 0 10px rgba(74, 222, 128, 0.6);
+        animation: live-blink 2s ease-in-out infinite;
+      }
+      @keyframes live-blink {
+        0%, 50%, 100% { opacity: 1; }
+        25%, 75% { opacity: 0.45; }
+      }
+
+      .icon-link {
+        display: inline-flex;
+        align-items: center;
+        gap: 8px;
+        padding: 6px 11px;
+        border: 1px solid var(--line-2);
+        font-size: 10px;
+        letter-spacing: 0.18em;
+        color: var(--bone);
+        transition: border-color 160ms ease, color 160ms ease, background 160ms ease;
+      }
+      .icon-link:hover {
+        border-color: var(--amber);
+        color: var(--amber);
+        background: rgba(255, 159, 28, 0.06);
+      }
+      .icon-link svg { width: 13px; height: 13px; }
+
+      /* ====== hero — vertically centered, fits without scroll ====== */
+      .hero {
+        position: relative;
+        display: flex;
+        flex-direction: column;
+        justify-content: center;
+        align-items: flex-start;
+        max-width: 920px;
+        margin: 0 auto;
+        width: 100%;
+        height: 100%;
+        padding: 16px 0;
+        gap: 14px;
+        min-height: 0; /* allow children to shrink */
+      }
+
+      .vf-corner {
+        position: absolute;
+        width: 20px;
+        height: 20px;
+        pointer-events: none;
+      }
+      .vf-corner::before,
+      .vf-corner::after {
+        content: "";
+        position: absolute;
+        background: var(--amber);
+        box-shadow: 0 0 10px rgba(255, 159, 28, 0.5);
+      }
+      .vf-corner::before { width: 100%; height: 1.4px; }
+      .vf-corner::after { width: 1.4px; height: 100%; }
+      .vf-tl { top: 12px; left: -8px; }
+      .vf-tl::before, .vf-tl::after { top: 0; left: 0; }
+      .vf-tr { top: 12px; right: -8px; }
+      .vf-tr::before { top: 0; right: 0; }
+      .vf-tr::after { top: 0; right: 0; }
+      .vf-bl { bottom: 12px; left: -8px; }
+      .vf-bl::before { bottom: 0; left: 0; }
+      .vf-bl::after { bottom: 0; left: 0; }
+      .vf-br { bottom: 12px; right: -8px; }
+      .vf-br::before { bottom: 0; right: 0; }
+      .vf-br::after { bottom: 0; right: 0; }
+
+      .kicker {
+        margin: 0;
+        font-size: 10.5px;
+        letter-spacing: 0.32em;
+        color: var(--amber);
+        text-transform: uppercase;
+      }
+
+      .display {
+        margin: 0;
+        font-family: var(--f-display);
+        font-weight: 700;
+        font-stretch: 110%;
+        font-size: clamp(38px, 6.5vw, 96px);
+        line-height: 0.9;
+        letter-spacing: -0.02em;
+        color: var(--bone);
+        text-transform: uppercase;
+      }
+      .display .line-a {
+        display: block;
+        font-weight: 800;
+        font-stretch: 92%;
+      }
+      .display .line-b {
+        display: block;
+        font-weight: 300;
+        font-stretch: 122%;
+        font-style: italic;
+        color: var(--amber);
+        margin: -0.04em 0;
+      }
+      .display .line-c {
+        display: block;
+        font-weight: 500;
+        font-stretch: 110%;
+        color: var(--bone-dim);
+      }
+
+      .lead {
+        max-width: 600px;
+        margin: 0;
+        font-size: clamp(13px, 1.2vw, 16px);
+        line-height: 1.55;
+        color: var(--bone-dim);
+      }
+
+      .cta-row {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 10px;
+      }
+
+      .btn-primary,
+      .btn-secondary {
+        display: inline-flex;
+        align-items: center;
+        gap: 10px;
+        padding: 11px 18px;
+        font-family: var(--f-mono);
+        font-size: 11.5px;
+        letter-spacing: 0.22em;
+        text-transform: uppercase;
+        font-weight: 700;
+        transition: transform 140ms ease, background 160ms ease, border-color 160ms ease;
+      }
+      .btn-primary { background: var(--amber); color: #1a0e00; }
+      .btn-primary:hover { background: var(--amber-hot); transform: translateY(-1px); }
+      .btn-primary svg { width: 14px; height: 14px; }
+      .btn-primary .arrow { transition: transform 200ms ease; }
+      .btn-primary:hover .arrow { transform: translateX(3px); }
+
+      .btn-secondary { background: transparent; color: var(--bone); border: 1px solid var(--line-2); }
+      .btn-secondary:hover { border-color: var(--amber); color: var(--amber); background: rgba(255, 159, 28, 0.06); }
+      .btn-secondary svg { width: 13px; height: 13px; }
+
+      /* ====== llm prompt — compact, no internal scroll ====== */
+      .llm-block {
+        position: relative;
+        width: 100%;
+        max-width: 720px;
+        border: 1px solid var(--line-2);
+        background: rgba(7, 7, 10, 0.65);
+        backdrop-filter: blur(6px);
+      }
+      .llm-head {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        gap: 16px;
+        padding: 7px 12px;
+        border-bottom: 1px solid var(--line);
+      }
+      .llm-tag {
+        font-family: var(--f-mono);
+        font-size: 9.5px;
+        letter-spacing: 0.2em;
+        text-transform: uppercase;
+        color: var(--amber);
+      }
+      .llm-targets {
+        font-family: var(--f-mono);
+        font-size: 9.5px;
+        letter-spacing: 0.18em;
+        text-transform: uppercase;
+        color: var(--mute);
+      }
+      .llm-prompt {
+        margin: 0;
+        padding: 12px 14px;
+        font-family: var(--f-mono);
+        font-size: 11.5px;
+        line-height: 1.55;
+        color: var(--bone);
+        white-space: pre-wrap;
+        word-break: break-word;
+        cursor: pointer;
+      }
+      .llm-prompt:hover { background: rgba(255, 159, 28, 0.03); }
+
+      .hero-meta {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 10px;
+        font-size: 9.5px;
+        letter-spacing: 0.22em;
+        color: var(--mute);
+        text-transform: uppercase;
+      }
+
+      /* ====== toast ====== */
+      .toast {
+        position: fixed;
+        bottom: 56px;
+        left: 50%;
+        transform: translateX(-50%) translateY(8px);
+        padding: 9px 16px;
+        background: rgba(7, 7, 10, 0.96);
+        border: 1px solid var(--amber);
+        color: var(--amber);
+        font-family: var(--f-mono);
+        font-size: 10.5px;
+        letter-spacing: 0.22em;
+        text-transform: uppercase;
+        opacity: 0;
+        pointer-events: none;
+        transition: opacity 220ms ease, transform 220ms ease;
+        z-index: 50;
+      }
+      .toast.show { opacity: 1; transform: translateX(-50%) translateY(0); }
+
+      /* ====== load animation ====== */
+      .hero > * {
+        opacity: 0;
+        transform: translateY(8px);
+        animation: rise 720ms cubic-bezier(0.2, 0.7, 0.2, 1) forwards;
+      }
+      .hero > *:nth-child(1) { animation-delay: 120ms; }
+      .hero > *:nth-child(2) { animation-delay: 220ms; }
+      .hero > *:nth-child(3) { animation-delay: 340ms; }
+      .hero > *:nth-child(4) { animation-delay: 480ms; }
+      .hero > *:nth-child(5) { animation-delay: 620ms; }
+      .hero > *:nth-child(6) { animation-delay: 760ms; }
+      .hero > *:nth-child(7) { animation-delay: 900ms; }
+      @keyframes rise { to { opacity: 1; transform: translateY(0); } }
+
+      /* ====== short / narrow viewports ====== */
+      @media (max-height: 720px) {
+        .hero { gap: 10px; padding: 8px 0; }
+        .display { font-size: clamp(32px, 5.5vw, 72px); }
+        .lead { font-size: 13px; line-height: 1.45; }
+        .llm-prompt { font-size: 11px; padding: 10px 12px; }
+        .hero-meta { font-size: 9px; }
+      }
+      @media (max-height: 600px) {
+        .lead { display: none; }
+      }
+      @media (max-width: 720px) {
+        .page { padding: 0 16px; grid-template-rows: 44px 1fr 28px; }
+        .display { font-size: clamp(36px, 11vw, 64px); }
+        .topbar { font-size: 9px; }
+        .icon-link { padding: 5px 9px; font-size: 9.5px; letter-spacing: 0.14em; }
+        .bottombar { font-size: 8.5px; }
+        .btn-primary, .btn-secondary { padding: 10px 14px; font-size: 10.5px; letter-spacing: 0.18em; }
+        .llm-targets { display: none; }
+      }
+    </style>
+  </head>
+  <body>
+    <div class="bg" aria-hidden="true"></div>
+    <div class="bg-vignette" aria-hidden="true"></div>
+    <div class="grain" aria-hidden="true"></div>
+    <div class="scanline" aria-hidden="true"></div>
+
+    <div class="page">
+      <header class="topbar">
+        <div class="brand">
+          <span class="dot" aria-hidden="true"></span>
+          <span class="mono">CELEBIPLUG · GEO-CINEMA · v1.0</span>
+        </div>
+        <a id="github-link-top" class="icon-link" href="#" target="_blank" rel="noreferrer">
+          <svg viewBox="0 0 24 24" fill="currentColor" aria-hidden="true">
+            <path d="M12 .5C5.65.5.5 5.65.5 12c0 5.08 3.29 9.39 7.86 10.91.58.1.79-.25.79-.56v-2c-3.2.7-3.87-1.36-3.87-1.36-.52-1.33-1.28-1.68-1.28-1.68-1.05-.72.08-.7.08-.7 1.16.08 1.77 1.19 1.77 1.19 1.03 1.77 2.7 1.26 3.36.97.1-.75.4-1.26.74-1.55-2.55-.29-5.24-1.28-5.24-5.69 0-1.26.45-2.28 1.18-3.08-.12-.29-.51-1.46.11-3.04 0 0 .97-.31 3.18 1.18.92-.25 1.91-.38 2.89-.38.98 0 1.97.13 2.89.38 2.21-1.49 3.18-1.18 3.18-1.18.62 1.58.23 2.75.11 3.04.73.8 1.18 1.82 1.18 3.08 0 4.42-2.69 5.4-5.25 5.68.41.36.78 1.06.78 2.14v3.17c0 .31.21.67.8.56C20.21 21.39 23.5 17.08 23.5 12 23.5 5.65 18.35.5 12 .5z"/>
+          </svg>
+          GITHUB
+        </a>
+      </header>
+
+      <main class="hero">
+        <span class="vf-corner vf-tl" aria-hidden="true"></span>
+        <span class="vf-corner vf-tr" aria-hidden="true"></span>
+        <span class="vf-corner vf-bl" aria-hidden="true"></span>
+        <span class="vf-corner vf-br" aria-hidden="true"></span>
+
+        <h1 class="display">
+          <span class="line-a">CELEBIPLUG</span>
+        </h1>
+
+        <p class="lead">
+          CelebiPlug is a 60-second cinematic recorder. Drop a GeoJSON, pick up to two
+          POIs, hit record — and walk away with a Mapbox 3D satellite + terrain + buildings
+          WebM, composed and captured straight from your browser. No FFmpeg, no backend.
+        </p>
+
+        <div class="cta-row">
+          <a id="github-link-cta" class="btn-primary" href="#" target="_blank" rel="noreferrer">
+            <svg viewBox="0 0 24 24" fill="currentColor" aria-hidden="true">
+              <path d="M12 .5C5.65.5.5 5.65.5 12c0 5.08 3.29 9.39 7.86 10.91.58.1.79-.25.79-.56v-2c-3.2.7-3.87-1.36-3.87-1.36-.52-1.33-1.28-1.68-1.28-1.68-1.05-.72.08-.7.08-.7 1.16.08 1.77 1.19 1.77 1.19 1.03 1.77 2.7 1.26 3.36.97.1-.75.4-1.26.74-1.55-2.55-.29-5.24-1.28-5.24-5.69 0-1.26.45-2.28 1.18-3.08-.12-.29-.51-1.46.11-3.04 0 0 .97-.31 3.18 1.18.92-.25 1.91-.38 2.89-.38.98 0 1.97.13 2.89.38 2.21-1.49 3.18-1.18 3.18-1.18.62 1.58.23 2.75.11 3.04.73.8 1.18 1.82 1.18 3.08 0 4.42-2.69 5.4-5.25 5.68.41.36.78 1.06.78 2.14v3.17c0 .31.21.67.8.56C20.21 21.39 23.5 17.08 23.5 12 23.5 5.65 18.35.5 12 .5z"/>
+            </svg>
+            Star on GitHub
+            <span class="arrow" aria-hidden="true">→</span>
+          </a>
+          <button id="copy-llm" class="btn-secondary" type="button">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" aria-hidden="true">
+              <rect x="9" y="9" width="13" height="13" rx="2" />
+              <path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1" />
+            </svg>
+            Copy LLM prompt
+          </button>
+        </div>
+
+        <div class="hero-meta mono">
+          <span>BUILT ON · MAPBOX GL v3</span>
+          <span>·</span>
+          <span>OUTPUT · WEBM VP9 · 60s · 30FPS</span>
+          <span>·</span>
+          <span>LICENSE · MIT</span>
+        </div>
+      </main>
+
+      <footer class="bottombar mono">
+        <span>© 2026 CELEBIPLUG · OPEN SOURCE</span>
+        <span>NO DATA LEAVES YOUR BROWSER</span>
+        <span>BUILD 1.0.0</span>
+      </footer>
+    </div>
+
+    <div id="toast" class="toast" role="status"></div>
+
+    <script>
+      // ============================================================
+      //  Edit this one line when you publish. All GitHub links and the
+      //  copy-prompt button use this single source of truth.
+      // ============================================================
+      const REPO_URL = "https://github.com/<your-user>/celebiplug";
+
+      const LLM_PROMPT = `Set up ${REPO_URL} for me.
+Read \`install.md\` and follow the steps to install CelebiPlug,
+start the local dev server, and walk me through the Mapbox
+public-token setup.`;
+
+      const githubTop = document.getElementById("github-link-top");
+      const githubCta = document.getElementById("github-link-cta");
+      const copyBtn = document.getElementById("copy-llm");
+      const toastEl = document.getElementById("toast");
+
+      githubTop.href = REPO_URL;
+      githubCta.href = REPO_URL;
+
+      function showToast(message) {
+        toastEl.textContent = message;
+        toastEl.classList.add("show");
+        clearTimeout(showToast._tid);
+        showToast._tid = setTimeout(() => toastEl.classList.remove("show"), 2400);
+      }
+
+      async function copyPrompt() {
+        try {
+          if (navigator.clipboard && navigator.clipboard.writeText) {
+            await navigator.clipboard.writeText(LLM_PROMPT);
+          } else {
+            const ta = document.createElement("textarea");
+            ta.value = LLM_PROMPT;
+            ta.style.position = "fixed";
+            ta.style.opacity = "0";
+            document.body.appendChild(ta);
+            ta.select();
+            document.execCommand("copy");
+            ta.remove();
+          }
+          showToast("Prompt copied · paste into your LLM");
+        } catch (err) {
+          showToast("Copy failed — try again");
+        }
+      }
+
+      copyBtn.addEventListener("click", copyPrompt);
+    </script>
+  </body>
+</html>
