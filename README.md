@@ -1,4 +1,4 @@
-# Selam! Ben Köksal Yılmazkaya 🚀
+# Selam! Ben Köksal Yılmazkaya 
 
 ### İşletme Öğrencisi | AI & Otomasyon Meraklısı | YMK STUDIO Kurucusu
 
@@ -22,6 +22,5 @@
 ---
 
 ### 📫 Bana Ulaşın
-- 🌐 [YMK STUDIO](https://ymk-app.vercel.app/)
 - ✉️ [E-posta](mailto:yilmazkaya1283@gmail.com)
 
